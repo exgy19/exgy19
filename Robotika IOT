@@ -1,0 +1,126 @@
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+#include <ESP32Servo.h>
+
+// WiFi credentials
+const char* ssid = "NAMA_WIFI";
+const char* password = "PASSWORD_WIFI";
+
+// Web server on port 80
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+// Motor and servo pins
+const int motorPin1 = 15;
+const int motorPin2 = 2;
+const int motorSpeed = 4;
+const int servoPin = 13;
+Servo myservo;
+
+void setup() {
+  // Initialize Serial Monitor
+  Serial.begin(115200);
+  
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+
+  // Initialize motor and servo pins
+  pinMode(motorPin1, OUTPUT);
+  pinMode(motorPin2, OUTPUT);
+  pinMode(motorSpeed, OUTPUT);
+  myservo.attach(servoPin);
+
+  // Configure WebSocket server
+  ws.onEvent(onWebSocketEvent);
+  server.addHandler(&ws);
+
+  // Serve HTML page
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", index_html);
+  });
+
+  // Start server
+  server.begin();
+}
+
+void loop() {
+  ws.cleanupClients();
+}
+
+// WebSocket event handler
+void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
+                      void *arg, uint8_t *data, size_t len) {
+  if (type == WS_EVT_DATA) {
+    String message = "";
+    for (size_t i = 0; i < len; i++) {
+      message += (char) data[i];
+    }
+    handleWebSocketMessage(message);
+  }
+}
+
+// Handle WebSocket messages
+void handleWebSocketMessage(String message) {
+  if (message == "forward") {
+    digitalWrite(motorPin1, HIGH);
+    digitalWrite(motorPin2, LOW);
+    analogWrite(motorSpeed, 255);
+  } else if (message == "backward") {
+    digitalWrite(motorPin1, LOW);
+    digitalWrite(motorPin2, HIGH);
+    analogWrite(motorSpeed, 255);
+  } else if (message == "stop") {
+    digitalWrite(motorPin1, LOW);
+    digitalWrite(motorPin2, LOW);
+    analogWrite(motorSpeed, 0);
+  } else if (message.startsWith("servo")) {
+    int angle = message.substring(5).toInt();
+    myservo.write(angle);
+  }
+}
+
+// HTML page content
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Robot Surveillance</title>
+</head>
+<body>
+  <h1>Kontrol Robot</h1>
+  <button onclick="sendMessage('forward')">Maju</button>
+  <button onclick="sendMessage('backward')">Mundur</button>
+  <button onclick="sendMessage('stop')">Stop</button>
+  <br>
+  <input type="range" min="0" max="180" value="90" id="servoSlider">
+  <button onclick="setServo()">Set Servo</button>
+
+  <script>
+    var websocket = new WebSocket('ws://' + window.location.hostname + '/ws');
+
+    function sendMessage(message) {
+      websocket.send(message);
+    }
+
+    function setServo() {
+      var angle = document.getElementById('servoSlider').value;
+      sendMessage('servo' + angle);
+    }
+
+    websocket.onopen = function() {
+      console.log('WebSocket Connection Established');
+    };
+
+    websocket.onclose = function() {
+      console.log('WebSocket Connection Closed');
+    };
+  </script>
+</body>
+</html>
+)rawliteral";
